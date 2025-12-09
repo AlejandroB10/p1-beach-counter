@@ -181,3 +181,16 @@ def draw_overlays(
         cv2.circle(overlay, (cx, cy), 3, (0, 0, 255), -1)
 
     return overlay
+
+
+def count_segments(markers):
+    labels = np.unique(markers)
+    return len(labels[labels > 0])
+
+
+def assign_components_to_df(markers, df):
+    df['component_id'] = df.apply(
+        lambda row: 0 if row['y'] - 420 < 0 else markers[row['y'] - 420, row['x']],
+        axis=1
+    )
+    return df

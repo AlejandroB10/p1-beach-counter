@@ -69,3 +69,7 @@ def save_gray(path: Union[str, Path], img: np.ndarray) -> None:
     path = Path(path)
     ensure_dir(path.parent)
     cv2.imwrite(str(path), img)
+    
+def load_and_crop(path, crop_y=420):
+    img = cv2.imread(path)
+    return img[crop_y:, :]
