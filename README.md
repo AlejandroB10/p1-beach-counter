@@ -31,8 +31,28 @@ The dataset comprises static RGB images taken throughout the day, exhibiting dif
 
 ## 3. Execution Environment
 
-All experiments are conducted within the Conda environment **`sub11761`**, using **Python 3.11**.
+All experiments run in Conda env **`sub11761`** (Python 3.11). If the environment is already installed (see `environment.pdf`), just activate it:
 
-### Required Python Packages
+```bash
+conda activate sub11761
+```
 
-Only standard scientific and computer vision libraries are employed:
+### Quickstart (reproducible)
+```bash
+# install deps if needed
+pip install -r requirements.txt
+
+# run both pipelines on provided images with ROI + zones
+python scripts/run_pipeline.py --pipelines A,B --raw-dir data/raw --out-dir data/outputs
+```
+
+Outputs:
+- Metrics CSVs in `data/outputs/metrics/` (per-image counts and summary MAE/MSE/precision/recall/F1).
+- Visualizations in `data/outputs/viz/` (overlays and masks).
+- ROI visualizations in `data/outputs/viz/roi/`.
+
+Data layout:
+- Raw images: `data/raw/*.jpg`
+- Annotations (points): `data/annotations/*_points.csv`
+
+To rerun with a single pipeline, pass `--pipelines B` (or `A`). Disable ROI or zones with `--no-roi` / `--no-zones`.
