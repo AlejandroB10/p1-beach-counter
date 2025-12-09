@@ -1,77 +1,92 @@
-"""Evaluation utilities for counting accuracy."""
-from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+"""Evaluation utilities for image-level and person-level metrics."""
+
 import csv
+from pathlib import Path
+from typing import Dict, List, Tuple
 
-
-def count_from_boxes(boxes: List[Tuple[int, int, int, int]]) -> int:
-    """Count number of detections from bounding boxes.
-    
-    Args:
-        boxes: List of (x, y, w, h) bounding boxes
-        
-    Returns:
-        Count (number of boxes)
-    """
-    return len(boxes)
+Point = Tuple[int, int]
 
 
 def load_annotations(annotations_file: Path) -> Dict[str, int]:
-    """Load ground truth annotations from CSV file.
-    
-    Expected CSV format: Has 'image_name' column (one row per person)
-    Returns count per filename.
-    
-    Args:
-        annotations_file: Path to CSV file with annotations
-        
-    Returns:
-        Dictionary mapping filename to count
-    """
+    """Load ground truth counts from a CSV where each row is a person."""
     if not annotations_file.exists():
         return {}
-    
-    counts: Dict[str, int] = {}
-    
-    with open(annotations_file, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # Support both 'filename' and 'image_name' columns
-            filename = row.get('image_name') or row.get('filename')
+
+    counts = {}
+    with open(annotations_file, "r") as f:
+        for row in csv.DictReader(f):
+            filename = row.get("image_name") or row.get("filename")
             if filename:
                 counts[filename] = counts.get(filename, 0) + 1
-    
     return counts
 
 
-def compute_mse(predictions: List[int], ground_truth: List[int]) -> float:
-    """Compute Mean Squared Error between predictions and ground truth.
-    
-    Args:
-        predictions: List of predicted counts
-        ground_truth: List of ground truth counts
-        
-    Returns:
-        MSE value
-    """
-    if len(predictions) != len(ground_truth):
-        raise ValueError("Predictions and ground truth must have same length")
-    
-    if len(predictions) == 0:
+def load_points(annotations_file: Path) -> Dict[str, List[Point]]:
+    """Load ground truth person points (x,y) per image from CSV."""
+    if not annotations_file.exists():
+        return {}
+    points: Dict[str, List[Point]] = {}
+    with open(annotations_file, "r") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) < 4:
+                continue
+            try:
+                x, y = int(row[1]), int(row[2])
+            except ValueError:
+                continue
+            filename = row[3]
+            points.setdefault(filename, []).append((x, y))
+    return points
+
+
+def compute_mae(predictions: List[int], ground_truth: List[int]) -> float:
+    """Mean Absolute Error for image-level counting."""
+    if len(predictions) != len(ground_truth) or not predictions:
         return 0.0
-    
-    squared_errors = [(pred - gt) ** 2 for pred, gt in zip(predictions, ground_truth)]
-    return sum(squared_errors) / len(squared_errors)
+    return sum(abs(p - g) for p, g in zip(predictions, ground_truth)) / len(predictions)
 
 
-def get_gt_count(filename: str, gt_dict: Dict[str, int]) -> Optional[int]:
-    """Get ground truth count for a filename.
-    
-    Args:
-        filename: Image filename (basename only, e.g., "1660366800.jpg")
-        gt_dict: Dictionary from load_annotations
-        
-    Returns:
-        Count if available, None otherwise
-    """
-    return gt_dict.get(filename)
+def compute_mse(predictions: List[int], ground_truth: List[int]) -> float:
+    """Mean Squared Error for image-level counting."""
+    if len(predictions) != len(ground_truth) or not predictions:
+        return 0.0
+    return sum((p - g) ** 2 for p, g in zip(predictions, ground_truth)) / len(predictions)
+
+
+def match_points(pred: List[Point], gt: List[Point], radius: float = 20.0) -> Tuple[int, int, int]:
+    """Greedy matching between predicted centers and GT points within a radius."""
+    if not gt:
+        return 0, len(pred), 0
+    if not pred:
+        return 0, 0, len(gt)
+
+    gt_used = [False] * len(gt)
+    tp = 0
+    for px, py in pred:
+        best_idx = -1
+        best_dist2 = radius * radius
+        for i, (gx, gy) in enumerate(gt):
+            if gt_used[i]:
+                continue
+            dx = px - gx
+            dy = py - gy
+            d2 = dx * dx + dy * dy
+            if d2 <= best_dist2:
+                best_dist2 = d2
+                best_idx = i
+        if best_idx >= 0:
+            gt_used[best_idx] = True
+            tp += 1
+
+    fp = len(pred) - tp
+    fn = len(gt) - tp
+    return tp, fp, fn
+
+
+def precision_recall_f1(tp: int, fp: int, fn: int) -> Tuple[float, float, float]:
+    """Compute precision, recall, and F1-score."""
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    return precision, recall, f1

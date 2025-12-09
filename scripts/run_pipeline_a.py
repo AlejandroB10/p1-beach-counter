@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from io_utils import list_images, read_bgr, save_bgr, save_gray
 from edges import canny_gray
 from morphology import close_open
-from counting import connected_components, draw_overlays, count_from_boxes
-from evaluation import load_annotations, get_gt_count
+from counting import connected_components, draw_overlays
+from evaluation import load_points, compute_mae, compute_mse, match_points, precision_recall_f1
 
 
 # Pipeline A parameters (optimized)
@@ -107,18 +107,20 @@ def main():
         print(f"Error: No images found in {raw_dir}")
         return 1
 
-    # Process first 3 images (or all if less than 3)
-    images = all_images[:3]
-    print(f"Pipeline A: People Counter")
-    print(f"Processing {len(images)} images")
-    print(f"Parameters: {PARAMS}")
-    print()
+    # Process all images
+    images = all_images
+    print("Pipeline A: People Counter")
+    print(f"Processing {len(images)} images with parameters: {PARAMS}\n")
 
     # Load ground truth annotations if available
+    gt_points = {}
     gt_dict = {}
     annotation_files = list(annotations_dir.glob('*_points.csv'))
+    if not annotation_files:
+        annotation_files = list(annotations_dir.glob('labels_*.csv'))
     if annotation_files:
-        gt_dict = load_annotations(annotation_files[0])
+        gt_points = load_points(annotation_files[0])
+        gt_dict = {k: len(v) for k, v in gt_points.items()}
         print(f"Loaded annotations from: {annotation_files[0].name}\n")
 
     # Create output directories
@@ -127,10 +129,11 @@ def main():
     viz_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    # Prepare CSV for results
-    timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    metrics_file = metrics_dir / f"counts_A_{timestamp}.csv"
+    # Prepare CSV for results (single consolidated file)
+    metrics_file = metrics_dir / "counts_all.csv"
     csv_rows = []
+    mae_data = []
+    person_totals = {'tp': 0, 'fp': 0, 'fn': 0}
 
     # Process each image
     for img_path in images:
@@ -150,8 +153,8 @@ def main():
         save_bgr(viz_dir / f"{img_stem}_overlay.png", results['overlay'])
 
         # Get count
-        count = count_from_boxes(results['boxes'])
-        gt_count = get_gt_count(img_name, gt_dict)
+        count = len(results['boxes'])
+        gt_count = gt_dict.get(img_name)
 
         # Print result
         print(f"  Detected: {count} people", end='')
@@ -162,27 +165,73 @@ def main():
             print()
 
         # Store for CSV
-        row = {
-            'filename': img_name,
-            'count': count,
-        }
+        row = {'filename': img_name, 'pipeline': 'A', 'count': count}
         if gt_count is not None:
             row['gt_count'] = gt_count
             row['residual'] = count - gt_count
+            mae_data.append((count, gt_count))
+            # person-level metrics (centers vs points)
+            gt_pts = gt_points.get(img_name, [])
+            if gt_pts:
+                tp, fp, fn = match_points(results['centers'], gt_pts, radius=20.0)
+                person_totals['tp'] += tp
+                person_totals['fp'] += fp
+                person_totals['fn'] += fn
+                prec_i, rec_i, f1_i = precision_recall_f1(tp, fp, fn)
+                row.update({'tp': tp, 'fp': fp, 'fn': fn,
+                            'precision': round(prec_i, 3),
+                            'recall': round(rec_i, 3),
+                            'f1': round(f1_i, 3)})
         csv_rows.append(row)
 
         print()
 
-    # Write CSV
-    fieldnames = ['filename', 'count']
-    if any('gt_count' in row for row in csv_rows):
-        fieldnames.extend(['gt_count', 'residual'])
+    # Summary row (image-level + person-level if available)
+    summary_rows = []
+    if mae_data:
+        preds = [p for p, _ in mae_data]
+        gts = [g for _, g in mae_data]
+        mae = compute_mae(preds, gts)
+        mse = compute_mse(preds, gts)
+        tp = person_totals['tp']
+        fp = person_totals['fp']
+        fn = person_totals['fn']
+        prec, rec, f1 = precision_recall_f1(tp, fp, fn)
+        summary_rows.append({
+            'filename': 'SUMMARY',
+            'pipeline': 'A',
+            'count': '',
+            'gt_count': '',
+            'residual': '',
+            'tp': tp,
+            'fp': fp,
+            'fn': fn,
+            'precision': round(prec, 3),
+            'recall': round(rec, 3),
+            'f1': round(f1, 3),
+            'images_with_gt': len(mae_data),
+            'mae': round(mae, 3),
+            'mse': round(mse, 3),
+        })
+        print("\nSummary:", summary_rows[0])
+
+    # Write single CSV including summary rows with consistent headers.
+    # Merge with existing counts_all.csv (replace pipeline A entries).
+    fieldnames = ['filename', 'pipeline', 'count', 'gt_count', 'residual',
+                  'tp', 'fp', 'fn', 'precision', 'recall', 'f1',
+                  'images_with_gt', 'mae', 'mse']
+    existing = []
+    if metrics_file.exists():
+        with open(metrics_file, newline='') as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                if r.get('pipeline') != 'A':
+                    existing.append(r)
 
     with open(metrics_file, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for row in csv_rows:
-            writer.writerow(row)
+        writer.writerows(existing + csv_rows + summary_rows)
 
     # Print summary
     print("="*60)
@@ -195,12 +244,11 @@ def main():
         count = row['count']
         gt = row.get('gt_count', '-')
         residual = row.get('residual', '-')
-        if residual != '-':
-            residual = f"{residual:+d}"
+        residual = f"{residual:+d}" if residual != '-' else residual
         print(f"{img:<25} {count:<10} {gt:<10} {residual:<10}")
     print("="*60)
     print(f"\nVisualizations saved to: {viz_dir}/")
-    print(f"Metrics saved to: {metrics_file}")
+    print(f"Metrics (with summary) saved to: {metrics_file}")
 
     return 0
 
