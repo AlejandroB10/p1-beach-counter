@@ -42,12 +42,15 @@ conda activate sub11761
 # install deps if needed
 pip install -r requirements.txt
 
-# run both pipelines on provided images with ROI + zones
-python scripts/run_pipeline.py --pipelines A,B --raw-dir data/raw --out-dir data/outputs
+# run Pipeline A (baseline grayscale+Canny)
+python scripts/run_pipeline_a.py
+
+# run Pipeline C (zone-aware LAB+Canny; zones are always enabled here)
+python scripts/run_pipeline_c.py
 ```
 
 Outputs:
-- Metrics CSVs in `data/outputs/metrics/` (per-image counts and summary MAE/MSE/precision/recall/F1).
+- Metrics CSVs consolidated in `data/outputs/metrics/` (`counts_all.csv` per-image, `summary_all.csv` per pipeline).
 - Visualizations in `data/outputs/viz/` (overlays and masks).
 - ROI visualizations in `data/outputs/viz/roi/`.
 
