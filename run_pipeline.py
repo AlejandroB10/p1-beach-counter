@@ -1,4 +1,6 @@
 import argparse
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Tuple
 
@@ -96,69 +98,100 @@ def run(
     return result
 
 
+def process_fn_a(img_bgr, params_local, _ctx):
+    return pipeline_a(img_bgr, params_local)
+
+
+def preproc_c(images, params_local, out_dir):
+    print("Computing median background...")
+    _, bg_img = generate_c_background(images, out_dir)
+    if bg_img is not None:
+        print("Background saved.")
+    first_img = read_bgr(images[0])
+    roi_mask, water_mask, sand_mask = generate_c_roi(first_img, params_local, out_dir)
+    return {
+        'bg': bg_img,
+        'roi': roi_mask,
+        'water': water_mask,
+        'sand': sand_mask
+    }
+
+
+def process_fn_c(img_bgr, params_local, ctx):
+    return pipeline_c(
+        img_bgr,
+        params_local,
+        ctx.get('roi'),
+        ctx.get('water'),
+        ctx.get('sand'),
+        ctx.get('bg')
+    )
+
+
+def run_B():
+    script_path = Path(__file__).parent / "scripts" / "run_pipeline_b.py"
+    print(f"Launching pipeline B via {script_path} (uses its internal configuration).")
+    try:
+        subprocess.run(
+            ["python", str(script_path)],
+            check=True,
+            cwd=Path(__file__).parent
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"Pipeline B failed (continuing): {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run counting pipelines.")
-    parser.add_argument("--pipeline", choices=["A", "B", "C"], default="C")
+    parser.add_argument("--pipeline", choices=["A", "B", "C", "all"], default="all")
     parser.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/outputs"))
     parser.add_argument("--ann-dir", type=Path, default=Path("data/annotations"))
     args = parser.parse_args()
 
     if args.pipeline == "A":
-        def process_fn(img_bgr, params_local, _ctx):
-            return pipeline_a(img_bgr, params_local)
-
         run(
             pipeline_name="A",
             raw_dir=args.raw_dir,
             out_dir=args.out_dir,
             ann_dir=args.ann_dir,
             params=PARAMS_A,
-            process_fn=process_fn,
+            process_fn=process_fn_a,
         )
     elif args.pipeline == "B":
-        # Leave pipeline B code untouched; just invoke its existing script.
-        import subprocess
-        script_path = Path(__file__).parent / "scripts" / "run_pipeline_b.py"
-        print(f"Launching pipeline B via {script_path} (uses its internal configuration).")
-        subprocess.run(
-            ["python", str(script_path)],
-            check=True,
-            cwd=Path(__file__).parent
-        )
-    else:
-        def preproc(images, params_local, out_dir):
-            print("Computing median background...")
-            _, bg_img = generate_c_background(images, out_dir)
-            if bg_img is not None:
-                print("Background saved.")
-            first_img = read_bgr(images[0])
-            roi_mask, water_mask, sand_mask = generate_c_roi(first_img, params_local, out_dir)
-            return {
-                'bg': bg_img,
-                'roi': roi_mask,
-                'water': water_mask,
-                'sand': sand_mask
-            }
-
-        def process_fn(img_bgr, params_local, ctx):
-            return pipeline_c(
-                img_bgr,
-                params_local,
-                ctx.get('roi'),
-                ctx.get('water'),
-                ctx.get('sand'),
-                ctx.get('bg')
-            )
-
+        run_B()
+    elif args.pipeline == "C":
         run(
             pipeline_name="C",
             raw_dir=args.raw_dir,
             out_dir=args.out_dir,
             ann_dir=args.ann_dir,
             params=PARAMS_C,
-            process_fn=process_fn,
-            preproc=preproc
+            process_fn=process_fn_c,
+            preproc=preproc_c
+        )
+    else:
+        # all: clear outputs and run A, B, then C, continuing on failures
+        if args.out_dir.exists():
+            shutil.rmtree(args.out_dir)
+        print("Running pipelines A, B, C (outputs cleared).")
+        run(
+            pipeline_name="A",
+            raw_dir=args.raw_dir,
+            out_dir=args.out_dir,
+            ann_dir=args.ann_dir,
+            params=PARAMS_A,
+            process_fn=process_fn_a,
+        )
+        run_B()
+        run(
+            pipeline_name="C",
+            raw_dir=args.raw_dir,
+            out_dir=args.out_dir,
+            ann_dir=args.ann_dir,
+            params=PARAMS_C,
+            process_fn=process_fn_c,
+            preproc=preproc_c
         )
 
 

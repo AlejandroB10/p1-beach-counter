@@ -31,7 +31,7 @@ The dataset comprises static RGB images taken throughout the day, exhibiting dif
 
 ## 3. Execution Environment
 
-All experiments run in Conda env **`sub11761`** (Python 3.11). If the environment is already installed (see `environment.pdf`), just activate it:
+All experiments run in Conda env **`sub11761`** (Python 3.11).
 
 ```bash
 conda activate sub11761
@@ -42,20 +42,19 @@ conda activate sub11761
 # install deps if needed
 pip install -r requirements.txt
 
-# run Pipeline A (baseline grayscale+Canny)
-python scripts/run_pipeline_a.py
+# default: clears outputs and runs pipelines A, B (legacy), and C
+python run_pipeline.py
 
-# run Pipeline C (zone-aware LAB+Canny; zones are always enabled here)
-python scripts/run_pipeline_c.py
+# run a single pipeline (A, B, or C)
+python run_pipeline.py --pipeline A
+python run_pipeline.py --pipeline C
 ```
 
 Outputs:
-- Metrics CSVs consolidated in `data/outputs/metrics/` (`counts_all.csv` per-image, `summary_all.csv` per pipeline).
-- Visualizations in `data/outputs/viz/` (overlays and masks).
-- ROI visualizations in `data/outputs/viz/roi/`.
+- Metrics: `data/outputs/metrics/counts_all.csv` and `summary_all.csv`.
+- Visualizations: `data/outputs/viz/A` and `data/outputs/viz/C`.
+- Pipeline C assets: `data/outputs/viz/c_background/` (median background) and `data/outputs/viz/c_roi/` (ROI/water/sand masks).
 
 Data layout:
 - Raw images: `data/raw/*.jpg`
 - Annotations (points): `data/annotations/*_points.csv`
-
-To rerun with a single pipeline, pass `--pipelines B` (or `A`). Disable ROI or zones with `--no-roi` / `--no-zones`.
