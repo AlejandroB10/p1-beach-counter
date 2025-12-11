@@ -190,18 +190,3 @@ def detect_in_zone(
         min_solidity, min_extent, max_extent
     )
     return mask, boxes, centers
-
-
-def save_results(
-    results: dict,
-    img_path: Path,
-    out_dir: Path,
-    pipeline_name: str = 'C'
-) -> None:
-    """Save pipeline visualization results to disk."""
-    viz_dir = out_dir / "viz" / pipeline_name
-    viz_dir.mkdir(parents=True, exist_ok=True)
-    stem = img_path.stem
-    save_gray(viz_dir / f"{stem}_mask.png", results['mask'])
-    save_bgr(viz_dir / f"{stem}_overlay.png", results['overlay'])
-    save_bgr(viz_dir / f"{stem}_enhanced.png", results['enhanced'])
