@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, Tuple
 
 from scripts.run_pipeline_a import PARAMS as PARAMS_A, pipeline_a
+from scripts.run_pipeline_b import PARAMS as PARAMS_B, pipeline_b
 from scripts.run_pipeline_c import PARAMS as PARAMS_C, pipeline_c
 from src.evaluation import collect_metrics_row, finalize_metrics, init_run
 from src.io_utils import list_images, read_bgr, save_bgr, save_gray
@@ -102,6 +103,23 @@ def process_fn_a(img_bgr, params_local, _ctx):
     return pipeline_a(img_bgr, params_local)
 
 
+def preproc_b(images, params_local, out_dir):
+    """Load the background image for Pipeline B (using a fixed background file)."""
+    # Pipeline B uses a specific background image: 1660370400.jpg
+    bg_path = out_dir.parent / "raw" / "1660370400.jpg"
+    if not bg_path.exists():
+        print(f"Warning: Background image {bg_path} not found. Using first image as fallback.")
+        bg_img = read_bgr(images[0])
+    else:
+        bg_img = read_bgr(bg_path)
+        print(f"Loaded background: {bg_path.name}")
+    return {'bg': bg_img}
+
+
+def process_fn_b(img_bgr, params_local, ctx):
+    return pipeline_b(img_bgr, params_local, ctx)
+
+
 def preproc_c(images, params_local, out_dir):
     print("Computing median background...")
     _, bg_img = generate_c_background(images, out_dir)
@@ -128,17 +146,7 @@ def process_fn_c(img_bgr, params_local, ctx):
     )
 
 
-def run_B():
-    script_path = Path(__file__).parent / "scripts" / "run_pipeline_b.py"
-    print(f"Launching pipeline B via {script_path} (uses its internal configuration).")
-    try:
-        subprocess.run(
-            ["python", str(script_path)],
-            check=True,
-            cwd=Path(__file__).parent
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"Pipeline B failed (continuing): {e}")
+
 
 
 def main():
@@ -159,7 +167,15 @@ def main():
             process_fn=process_fn_a,
         )
     elif args.pipeline == "B":
-        run_B()
+        run(
+            pipeline_name="B",
+            raw_dir=args.raw_dir,
+            out_dir=args.out_dir,
+            ann_dir=args.ann_dir,
+            params=PARAMS_B,
+            process_fn=process_fn_b,
+            preproc=preproc_b
+        )
     elif args.pipeline == "C":
         run(
             pipeline_name="C",
@@ -183,7 +199,15 @@ def main():
             params=PARAMS_A,
             process_fn=process_fn_a,
         )
-        run_B()
+        run(
+            pipeline_name="B",
+            raw_dir=args.raw_dir,
+            out_dir=args.out_dir,
+            ann_dir=args.ann_dir,
+            params=PARAMS_B,
+            process_fn=process_fn_b,
+            preproc=preproc_b
+        )
         run(
             pipeline_name="C",
             raw_dir=args.raw_dir,
